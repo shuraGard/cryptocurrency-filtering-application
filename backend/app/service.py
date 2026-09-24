@@ -30,6 +30,8 @@ class ProjectService:
         self._markets: TTLCache[str, MarketSnapshot] = TTLCache(settings.markets_cache_ttl_seconds)
         self._details: TTLCache[str, CoinDetails] = TTLCache(settings.details_cache_ttl_seconds)
         self._refresh_lock = asyncio.Lock()
+        # Detail lookups currently in progress, shared by all requests (see _details_task).
+        self._inflight: dict[str, asyncio.Task[CoinDetails]] = {}
 
     async def get_projects(self, criteria: FilterCriteria) -> ProjectsResponse:
         snapshot = await self._load_markets()
@@ -93,18 +95,33 @@ class ProjectService:
             else:
                 missing.append(coin_id)
 
-        # The rate limiter inside the client spaces these out; gather just keeps the code simple.
-        results = await asyncio.gather(*(self._fetch_details(coin_id) for coin_id in missing), return_exceptions=True)
+        # The rate limiter inside the client spaces the calls out. shield() keeps a
+        # shared lookup alive if this particular request is cancelled.
+        results = await asyncio.gather(
+            *(asyncio.shield(self._details_task(coin_id)) for coin_id in missing),
+            return_exceptions=True,
+        )
 
         failures = 0
         for coin_id, result in zip(missing, results):
             if isinstance(result, BaseException):
                 failures += 1
                 log.warning("Skipping %s: %s", coin_id, result)
-                continue
-            self._details.set(coin_id, result)
-            found[coin_id] = result
+            else:
+                found[coin_id] = result
         return found, failures
 
-    async def _fetch_details(self, coin_id: str) -> CoinDetails:
-        return CoinDetails.from_api(await self._client.get_coin(coin_id))
+    def _details_task(self, coin_id: str) -> "asyncio.Task[CoinDetails]":
+        """Single flight per coin: if a lookup for this coin is already running
+        (e.g. the startup warm-up), join it instead of calling CoinGecko again."""
+        task = self._inflight.get(coin_id)
+        if task is None:
+            task = asyncio.create_task(self._fetch_and_cache(coin_id))
+            self._inflight[coin_id] = task
+            task.add_done_callback(lambda _: self._inflight.pop(coin_id, None))
+        return task
+
+    async def _fetch_and_cache(self, coin_id: str) -> CoinDetails:
+        details = CoinDetails.from_api(await self._client.get_coin(coin_id))
+        self._details.set(coin_id, details)
+        return details

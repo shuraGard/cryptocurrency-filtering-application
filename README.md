@@ -145,7 +145,9 @@ Performance choices, in order of impact:
 3. **Two caches.** The market snapshot is cached for 5 minutes; per-coin details for
    30 minutes (TVL and the preview flag change slowly). A refresh therefore only
    pays for coins that are *new* candidates. Concurrent requests during a refresh
-   share one fetch (single-flight lock) rather than each hitting CoinGecko.
+   share the work instead of each hitting CoinGecko: one lock around the market
+   fetch, and in-flight per-coin lookups are joined rather than repeated (so opening
+   the UI while the startup warm-up runs does not double the wait).
 4. **Bounded work.** `MAX_DETAIL_FETCHES` caps per-coin calls per refresh (largest
    market caps first) and the response flags `candidates_truncated` so the UI can say
    so. `MARKET_PAGES` bounds how far down the market-cap ranking we scan.
@@ -178,7 +180,7 @@ less unchanged.
 - [x] Partial-match search by name (also matches the ticker symbol, e.g. `eth` → Ethereum)
 - [x] Sorting by market cap and by 24h volume, both directions
 - [x] Loading, error and empty states; the UI explains when a cap or a lookup failure affected the result
-- [x] 24 backend unit/integration tests (filters, pipeline, caching, truncation, endpoint) that run without network
+- [x] 25 backend unit/integration tests (filters, pipeline, caching, request de-duplication, truncation, endpoint) that run without network
 - [x] This README
 
 ## Assumptions and limitations

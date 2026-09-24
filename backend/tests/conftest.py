@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 import pytest
@@ -46,6 +47,7 @@ class FakeCoinGeckoClient:
 
     async def get_coin(self, coin_id: str) -> dict[str, Any]:
         self.detail_calls.append(coin_id)
+        await asyncio.sleep(0.01)  # like a real call: gives concurrent requests a chance to overlap
         try:
             return self.details[coin_id]
         except KeyError:

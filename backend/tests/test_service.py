@@ -74,3 +74,19 @@ def test_failed_detail_lookup_skips_that_coin_only(settings):
 
     assert [item.id for item in response.items] == ["ok"]
     assert response.meta.detail_failures == 1
+
+
+def test_concurrent_requests_share_detail_lookups(settings):
+    """A request arriving while the warm-up is still running must not repeat its calls."""
+    markets = [market_coin(id=f"c{i}").model_dump() for i in range(3)]
+    client = FakeCoinGeckoClient(markets, {f"c{i}": detail_payload(f"c{i}") for i in range(3)})
+    service = ProjectService(client, settings)
+
+    async def concurrently():
+        return await asyncio.gather(service.get_projects(FilterCriteria()), service.get_projects(FilterCriteria()))
+
+    first, second = _run(concurrently())
+
+    assert first.count == second.count == 3
+    assert client.market_calls == 1
+    assert sorted(client.detail_calls) == ["c0", "c1", "c2"]  # each coin looked up exactly once
