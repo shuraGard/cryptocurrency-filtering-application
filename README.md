@@ -253,3 +253,5 @@ frontend/
   vite.config.js   dev proxy /api → backend
   package.json
 ```
+## Frontend illustration
+<img width="1647" height="712" alt="image" src="https://github.com/user-attachments/assets/edf6f7c1-b55f-43dd-a572-188a2161ab41" />
